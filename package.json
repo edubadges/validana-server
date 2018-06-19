@@ -1,0 +1,42 @@
+{
+	"name": "validana-server",
+	"version": "1.0.0",
+	"private": true,
+	"description": "The Validana server for handling client requests.",
+	"author": "Coinversable BV",
+	"homepage": "https://validana.io/",
+	"license": "GNU AGPLv3",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Coinversable/validana-server.git"
+	},
+	"main": "dist/index.js",
+	"typings": "src/index.ts",
+	"keywords": [
+		"coinversable",
+		"validana",
+		"server",
+		"backend"
+	],
+	"scripts": {
+		"build": "tsc -p .",
+		"start": "node -e \"require('./dist/app.js').start()\" dist/app.js",
+		"tslint": "tslint --project tsconfig.json -c tslint.json src/**/*.ts"
+	},
+	"files": [
+		"dist/",
+		"src/"
+	],
+	"dependencies": {
+		"@types/node": "*",
+		"@types/pg": "^7.4.9",
+		"@types/raven": "^2.1.6",
+		"@types/ws": "^5.1.0",
+		"pg": "^7.4.1",
+		"raven": "^2.6.2",
+		"ws": "^5.2.0"
+	},
+	"devDependencies": {
+		"source-map-support": "^0.5.4"
+	}
+}
