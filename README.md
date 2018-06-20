@@ -51,7 +51,7 @@ Start Validana Server
 
 Extending the Validana Server
 -----------------------------
-1. Add as dependency in package.json: `"validana-server": "git+ssh://git@github.com/Coinversable/Validana-Server.git"`
+1. Add as dependency in package.json: `"validana-server": "git://github.com/Coinversable/validana-server.git"`
 2. In the main entrypoint of your app add:
 
 ```
