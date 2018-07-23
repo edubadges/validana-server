@@ -6,7 +6,7 @@
 		"typeRoots": [
 			"node_modules/@types"
 		],
-		"target": "es6",
+		"target": "es2017",
 		"module": "commonjs",
 		"noImplicitAny": true,
 		"noImplicitThis": true,

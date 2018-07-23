@@ -6,19 +6,27 @@
  * found in the LICENSE file at https://validana.io/license
  */
 
-export { Crypto } from "./tools/crypto";
-export { Log } from "./tools/log";
+import { Log, start, Config, Crypto } from "validana-server";
 
-export { Handler } from "./handlers/handler";
-export { RestHandler } from "./handlers/resthandler";
-export { WebsocketHandler } from "./handlers/wshandler";
+//Add new keys to the config
+export interface ExtraConfig {
+	VSERVER_ADDR: string;
+	VSERVER_NAME: string;
+}
+Config.addStringConfig<ExtraConfig>("VSERVER_NAME", "Surf");
+Config.addStringConfig<ExtraConfig>("VSERVER_ADDR", undefined, (input) => {
+	if (input === undefined) {
+		throw new Error("No address given.");
+	}
+	const decodedAddress = Crypto.base58ToBinary(input);
+	const checksum = decodedAddress.slice(-4);
+	if (decodedAddress[0] !== 0x00 || !Crypto.hash256(decodedAddress.slice(0, -4)).slice(0, 4).equals(checksum)) {
+		throw new Error("Invalid address.");
+	}
+});
 
-export { addBasics } from "./basics/addBasics";
-export { BasicRequestTypes, BasicPushTypes, RequestData, ReponseData, PushData, ProcessRequest, TxRequest, Contract, TxResponseOrPush } from "./basics/basicapi";
-import BasicHandler from "./basics/basichandler";
-export { BasicHandler };
+//Set the log version
+Log.options.tags!.version = "1.0.0";
 
-export { Database } from "./database";
-export { DBTransaction, ActionHandler, TransactionStatus, UpdateReason } from "./actionhandler";
-export { Config } from "./config";
-export { start } from "./app";
+//Start the program
+start();

@@ -1,14 +1,14 @@
 {
-	"name": "validana-server",
+	"name": "validana-educhain-server",
 	"version": "1.0.0",
 	"private": true,
-	"description": "The Validana server for handling client requests.",
+	"description": "The Server for handling client requests for Educhain.",
 	"author": "Coinversable BV",
-	"homepage": "https://validana.io/",
+	"homepage": "https://dev.educhain.nl",
 	"license": "GNU AGPLv3",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Coinversable/validana-server.git"
+		"url": "https://github.com/edubadges/validana-educhain-server.git"
 	},
 	"main": "dist/index.js",
 	"typings": "src/index.ts",
@@ -16,25 +16,17 @@
 		"coinversable",
 		"validana",
 		"server",
-		"backend"
+		"backend",
+		"educhain"
 	],
 	"scripts": {
 		"build": "tsc -p .",
-		"start": "node -e \"require('./dist/app.js').start()\" dist/app.js",
+		"start": "node dist/index.js",
 		"tslint": "tslint --project tsconfig.json -c tslint.json src/**/*.ts"
 	},
-	"files": [
-		"dist/",
-		"src/"
-	],
 	"dependencies": {
 		"@types/node": "*",
-		"@types/pg": "^7.4.9",
-		"@types/raven": "^2.1.6",
-		"@types/ws": "^5.1.0",
-		"pg": "^7.4.1",
-		"raven": "^2.6.2",
-		"ws": "^5.2.0"
+		"validana-server": "git://github.com/Coinversable/validana-server.git#v1.0.0"
 	},
 	"devDependencies": {
 		"source-map-support": "^0.5.4"
