@@ -6,155 +6,216 @@
  * found in the LICENSE file at https://validana.io/license
  */
 
-import { Database, Log, Crypto, ActionHandler, addBasics, Handler, Config } from "validana-server";
-import { RequestType, BadgeClass, AddrInfo } from "./surfapiV1";
+// tslint:disable:no-null-keyword
+import { Database, Log, ActionHandler, addBasics, Handler, Config, DBTransaction } from "validana-server";
+import { RequestType, AddrInfo, EndorserBadge, EndorserBadgeClass, EndorsedBadge, EndorsedBadgeClass } from "./surfapiV1";
 import { ExtraConfig } from ".";
 
 /** A handler to deal with incomming messages. */
 export default class SurfHandlerV1 extends addBasics(ActionHandler) {
-	//All queries to retrieve info from the database
-	protected static readonly getBadgeClasses = "SELECT class FROM badgeclasses;";
-	protected static readonly getBadgeEndorsers = "SELECT entity FROM endorsebadges WHERE badge = $1;";
-	protected static readonly getBadgeClassEndorsers = "SELECT entity FROM endorseclasses WHERE class = $1 AND endorsed = true;";
-	protected static readonly getBadgeClassInfo = "SELECT * FROM badgeclasses WHERE class = ANY($1);";
-	protected static readonly getEndorsementsBadge = "SELECT badge FROM endorsebadges WHERE entity = $1;";
-	protected static readonly getEndorsementsBadgeClass = "SELECT class FROM endorseclasses WHERE entity = $1 AND endorsed = true;";
+	private allPush: boolean = false;
+
+	//All endorsers for a badge(class)
+	protected static readonly getBadgeEndorsers = "SELECT id, entity, json, issued_on FROM endorsementbadges WHERE badge = $1;";
+	protected static readonly getBadgeClassEndorsers = "SELECT id, entity, json, issued_on, revoked FROM endorsementclasses WHERE class = $1;";
+	//All badge(classes) endorsed by someone
+	protected static readonly getEndorsementsBadge = "SELECT id, badge, json, issued_on FROM endorsementbadges WHERE entity = $1;";
+	protected static readonly getEndorsementsBadgeClass = "SELECT id, class, json, issued_on, revoked FROM endorsementclasses WHERE entity = $1;";
+	//The badge(class)(endorsement) itsself
+	protected static readonly getBadge = "SELECT json, data FROM badges WHERE id = $1;";
+	protected static readonly getBadgeClass = "SELECT json, data FROM badgeclasses WHERE id = $1;";
+	protected static readonly getBadgeEndorsement = "SELECT json FROM endorsementbadges WHERE id = $1;";
+	protected static readonly getBadgeClassEndorsement = "SELECT json, revoked FROM endorsementclasses WHERE id = $1;";
+	//Other info
+	protected static readonly getInstitutions = "SELECT institution FROM institutions;";
 	protected static readonly getInstitution = "SELECT institution FROM entities WHERE entity = $1;";
 	protected static readonly getEntities = "SELECT entity FROM entities WHERE institution = $1;";
-	protected static readonly getInstitutions = "SELECT institution FROM institutions;";
-	protected static readonly getAddrInfo = "SELECT * FROM entities WHERE entity = ANY($1);";
-	protected static readonly getAddrInfo2 = "SELECT * FROM institutions WHERE institution = ANY($1);";
+	protected static readonly getAddrInfo = "SELECT entities.entity, institution, revoked, name, start_time, end_time " +
+		"FROM entities, entity_names WHERE entities.entity = entity_names.entity AND entities.entity = ANY($1);";
+	protected static readonly getAddrInfo2 = "SELECT institutions.institution, iri, revoked, name, start_time, end_time " +
+		"FROM institutions, institution_names WHERE institutions.institution = institution_names.institution AND institutions.institution = ANY($1);";
 
 	constructor(handler: Handler, client: any) {
 		super(handler, client);
-		this.addMessageHandler(RequestType.BadgeClasses, this.badgeClassesMessage);
+		//All endorsers for a badge(class)
 		this.addMessageHandler(RequestType.EndorsersBadge, this.endorsersBadgeMessage);
 		this.addMessageHandler(RequestType.EndorsersBadgeClass, this.endorsersBadgeClassMessage);
+		//All badge(classes) endorsed by someone
 		this.addMessageHandler(RequestType.EndorsedBadges, this.endorsedBadgesMessage);
 		this.addMessageHandler(RequestType.EndorsedBadgeClasses, this.endorsedBadgeClassesMessage);
-		this.addMessageHandler(RequestType.BadgeClassInfo, this.badgeClassInfoMessage);
-		this.addMessageHandler(RequestType.Entities, this.entitiesMessage);
-		this.addMessageHandler(RequestType.Institution, this.institutionMessage);
+		//The badge(class)(endorsement) itsself
+		this.addMessageHandler(RequestType.Badge, this.badgeMessage);
+		this.addMessageHandler(RequestType.BadgeClass, this.badgeClassMessage);
+		this.addMessageHandler(RequestType.EndorsementBadge, this.endorsementBadgeMessage);
+		this.addMessageHandler(RequestType.EndorsementBadgeClass, this.endorsementBadgeClassMessage);
+		//Other info
 		this.addMessageHandler(RequestType.Institutions, this.institutionsMessage);
-		this.addMessageHandler(RequestType.AddrInfo, this.addrInfoMessage);
+		this.addMessageHandler(RequestType.Institution, this.institutionMessage);
+		this.addMessageHandler(RequestType.Entities, this.entitiesMessage);
 		this.addMessageHandler(RequestType.RootInfo, this.rootInfoMessage);
+		this.addMessageHandler(RequestType.AddrInfo, this.addrInfoMessage);
+		//Listen to all blockchain transactions
+		this.addMessageHandler(RequestType.AllPush, this.allPushMessage);
 	}
 
-	protected async badgeClassesMessage(): Promise<BadgeClass[]> {
-		try {
-			const result = await Database.get().query({ text: SurfHandlerV1.getBadgeClasses });
-
-			const responseData: BadgeClass[] = [];
-			//Add all existing badge classes to the response
-			for (const row of result.rows) {
-				responseData.push(row.class);
-			}
-			return Promise.resolve(responseData);
-		} catch (error) {
-			Log.warn("Failed to retrieve all badge classes", error);
-			return Promise.reject("Unable to retrieve badge classes.");
-		}
-	}
-
-	protected async endorsersBadgeMessage(data?: string): Promise<string[]> {
+	protected async endorsersBadgeMessage(data?: string): Promise<EndorserBadge[]> {
 		if (typeof data !== "string") {
 			return Promise.reject("Missing or invalid request data parameters.");
 		}
 
 		try {
+			//Get all endorsers of a badge
 			const result = await Database.get().query({ text: SurfHandlerV1.getBadgeEndorsers, values: [data] });
-			const responseData: string[] = [];
-			//Add all endorsers to the response
-			for (const row of result.rows) {
-				responseData.push(row.entity);
-			}
-			return Promise.resolve(responseData);
+			return Promise.resolve(result.rows);
 		} catch (error) {
 			Log.warn("Failed to retrieve badge endorsers", error);
 			return Promise.reject("Unable to retrieve badge endorsers.");
 		}
 	}
 
-	protected async endorsersBadgeClassMessage(data?: string): Promise<string[]> {
+	protected async endorsersBadgeClassMessage(data?: string): Promise<EndorserBadgeClass[]> {
 		if (typeof data !== "string") {
 			return Promise.reject("Missing or invalid request data parameters.");
 		}
 
 		try {
+			//Get all endorsers of a badge class
 			const result = await Database.get().query({ text: SurfHandlerV1.getBadgeClassEndorsers, values: [data] });
-			const responseData: string[] = [];
-			//Add all endorsers to the response
-			for (const row of result.rows) {
-				responseData.push(row.entity);
-			}
-			return Promise.resolve(responseData);
+			return Promise.resolve(result.rows);
 		} catch (error) {
 			Log.warn("Failed to retrieve badge class endorsers", error);
 			return Promise.reject("Unable to retrieve badge class endorsers.");
 		}
 	}
 
-	protected async endorsedBadgesMessage(data?: string): Promise<string[]> {
+	protected async endorsedBadgesMessage(data?: string): Promise<EndorsedBadge[]> {
 		if (typeof data !== "string") {
 			return Promise.reject("Missing or invalid request data parameters.");
 		}
 
 		try {
-			//Get all endorsed badge classes
+			//Get all badges endorsed by some entity
 			const result = await Database.get().query({ text: SurfHandlerV1.getEndorsementsBadge, values: [data] });
-			const responseData: string[] = [];
-			//Add all badge classes to the response
-			for (const row of result.rows) {
-				responseData.push(Crypto.binaryToHex(row.badge));
-			}
-			return Promise.resolve(responseData);
+			return Promise.resolve(result.rows);
 		} catch (error) {
 			Log.warn("Failed to retrieve badge endorsements", error);
 			return Promise.reject("Unable to retrieve endorsements.");
 		}
 	}
 
-	protected async endorsedBadgeClassesMessage(data?: string): Promise<BadgeClass[]> {
+	protected async endorsedBadgeClassesMessage(data?: string): Promise<EndorsedBadgeClass[]> {
 		if (typeof data !== "string") {
 			return Promise.reject("Missing or invalid request data parameters.");
 		}
 
 		try {
-			//Get all endorsed badge classes
+			//Get all badge classes endorsed by some entity
 			const result = await Database.get().query({ text: SurfHandlerV1.getEndorsementsBadgeClass, values: [data] });
-			const responseData: BadgeClass[] = [];
-			//Add all badge classes to the response
-			for (const row of result.rows) {
-				responseData.push(row.class);
-			}
-			return Promise.resolve(responseData);
+			return Promise.resolve(result.rows);
 		} catch (error) {
 			Log.warn("Failed to retrieve badge class endorsements", error);
 			return Promise.reject("Unable to retrieve endorsements.");
 		}
 	}
 
-	protected async badgeClassInfoMessage(data?: string[]): Promise<BadgeClass[]> {
-		if (!(data instanceof Array) || data.find((value) => typeof value !== "string") !== undefined) {
+	protected async badgeMessage(badgeId: string): Promise<string> {
+		if (typeof badgeId !== "string") {
 			return Promise.reject("Missing or invalid request data parameters.");
 		}
 
 		try {
-			//Get information about all the badges that were provided
-			const result = await Database.get().query({ text: SurfHandlerV1.getBadgeClassInfo, values: [data] });
-			const responseData: BadgeClass[] = [];
+			const result = (await Database.get().query({ text: SurfHandlerV1.getBadge, values: [badgeId] })).rows[0];
+			if (result === undefined) {
+				return Promise.reject("Badge does not exist.");
+			}
+			return Promise.resolve(result.data === null ? result.json : result.data);
+		} catch (error) {
+			Log.warn("Failed to retrieve badge", error);
+			return Promise.reject("Unable to retrieve badge.");
+		}
+	}
+
+	protected async badgeClassMessage(badgeClassId: string): Promise<string> {
+		if (typeof badgeClassId !== "string") {
+			return Promise.reject("Missing or invalid request data parameters.");
+		}
+
+		try {
+			const result = (await Database.get().query({ text: SurfHandlerV1.getBadgeClass, values: [badgeClassId] })).rows[0];
+			if (result === undefined) {
+				return Promise.reject("Badge class does not exist.");
+			}
+			return Promise.resolve(result.data === null ? result.json : result.data);
+		} catch (error) {
+			Log.warn("Failed to retrieve badge class", error);
+			return Promise.reject("Unable to retrieve badge class.");
+		}
+	}
+
+	protected async endorsementBadgeMessage(endorsementId: number): Promise<object> {
+		if (typeof endorsementId !== "number") {
+			return Promise.reject("Missing or invalid request data parameters.");
+		}
+
+		try {
+			const result = (await Database.get().query({ text: SurfHandlerV1.getBadgeEndorsement, values: [endorsementId] })).rows[0];
+			if (result === undefined) {
+				return Promise.reject("Badge does not exist.");
+			}
+			return Promise.resolve(result.json);
+		} catch (error) {
+			Log.warn("Failed to retrieve badge endorsement", error);
+			return Promise.reject("Unable to retrieve badge endorsement.");
+		}
+	}
+
+	protected async endorsementBadgeClassMessage(endorsementId: number): Promise<object> {
+		if (typeof endorsementId !== "number") {
+			return Promise.reject("Missing or invalid request data parameters.");
+		}
+
+		try {
+			const result = (await Database.get().query({ text: SurfHandlerV1.getBadgeClassEndorsement, values: [endorsementId] })).rows[0];
+			if (result === undefined) {
+				return Promise.reject("Badge class does not exist.");
+			}
+			if (result.revoked !== null) {
+				return Promise.reject("Badge class endorsement has been revoked.");
+			}
+			return Promise.resolve(result.json);
+		} catch (error) {
+			Log.warn("Failed to retrieve badge class", error);
+			return Promise.reject("Unable to retrieve badge class.");
+		}
+	}
+
+	protected async institutionsMessage(): Promise<string[]> {
+		try {
+			const result = await Database.get().query({ text: SurfHandlerV1.getInstitutions });
+			const responseData: string[] = [];
 			//Add all entities to the response
 			for (const row of result.rows) {
-				responseData.push({
-					badgeClass: row.class,
-					metadata: row.metadata,
-					firstEndorser: row.first_endorser
-				});
+				responseData.push(row.institution);
 			}
 			return Promise.resolve(responseData);
 		} catch (error) {
-			Log.warn("Failed to retrieve badge class info", error);
-			return Promise.reject("Unable to retrieve badge class info.");
+			Log.warn("Failed to retrieve institutions", error);
+			return Promise.reject("Unable to retrieve institutions.");
+		}
+	}
+
+	protected async institutionMessage(data?: string): Promise<string | undefined> {
+		if (typeof data !== "string") {
+			return Promise.reject("Missing or invalid request data parameters.");
+		}
+
+		try {
+			const result = await Database.get().query({ text: SurfHandlerV1.getInstitution, values: [data] });
+			const responseData: string | undefined = result.rows.length === 0 ? undefined : result.rows[0].institution;
+			return Promise.resolve(responseData);
+		} catch (error) {
+			Log.warn("Failed to retrieve institution", error);
+			return Promise.reject("Unable to retrieve institution.");
 		}
 	}
 
@@ -177,34 +238,17 @@ export default class SurfHandlerV1 extends addBasics(ActionHandler) {
 		}
 	}
 
-	protected async institutionMessage(data?: string): Promise<string | undefined> {
-		if (typeof data !== "string") {
-			return Promise.reject("Missing or invalid request data parameters.");
-		}
-
-		try {
-			const result = await Database.get().query({ text: SurfHandlerV1.getInstitution, values: [data] });
-			const responseData: string | undefined = result.rows.length === 0 ? undefined : result.rows[0].institution;
-			return Promise.resolve(responseData);
-		} catch (error) {
-			Log.warn("Failed to retrieve institution", error);
-			return Promise.reject("Unable to retrieve institution.");
-		}
-	}
-
-	protected async institutionsMessage(): Promise<string[]> {
-		try {
-			const result = await Database.get().query({ text: SurfHandlerV1.getInstitutions });
-			const responseData: string[] = [];
-			//Add all entities to the response
-			for (const row of result.rows) {
-				responseData.push(row.institution);
-			}
-			return Promise.resolve(responseData);
-		} catch (error) {
-			Log.warn("Failed to retrieve institutions", error);
-			return Promise.reject("Unable to retrieve institutions.");
-		}
+	protected async rootInfoMessage(): Promise<AddrInfo> {
+		return Promise.resolve({
+			addr: Config.get<ExtraConfig>().VSERVER_ADDR,
+			names: [{
+				name: Config.get<ExtraConfig>().VSERVER_NAME,
+				startTime: 0,
+				endTime: null
+			}],
+			revokedTime: null,
+			type: "processor"
+		} as AddrInfo);
 	}
 
 	protected async addrInfoMessage(data?: string[]): Promise<AddrInfo[]> {
@@ -218,37 +262,60 @@ export default class SurfHandlerV1 extends addBasics(ActionHandler) {
 			try {
 				//Get the name of all institutions in data
 				const resultInstitutions = await Database.get().query({ text: SurfHandlerV1.getAddrInfo2, values: [data] });
-				const responseData: AddrInfo[] = [];
+				const responseData = new Map<string, AddrInfo>();
 				//Add all entities to the response
 				for (const row of resultEntities.rows) {
-					responseData.push({
-						addr: row.entity,
+					if (!responseData.has(row.entity)) {
+						responseData.set(row.entity, {
+							addr: row.entity,
+							names: [],
+							parent: row.institution,
+							revokedTime: row.revoked,
+							type: "entity"
+						});
+					}
+					responseData.get(row.entity)!.names.push({
 						name: row.name,
-						parent: row.institution,
-						withdrawn: !row.allowed,
-						type: "entity"
+						startTime: row.start_time,
+						endTime: row.end_time
 					});
 				}
 				//Add all institutions to the response
 				for (const row of resultInstitutions.rows) {
-					responseData.push({
-						addr: row.institution,
+					if (!responseData.has(row.institution)) {
+						responseData.set(row.institution, {
+							addr: row.institution,
+							names: [],
+							parent: Config.get<ExtraConfig>().VSERVER_ADDR,
+							revokedTime: row.revoked,
+							iri: row.iri,
+							type: "institution"
+						});
+					}
+					responseData.get(row.institution)!.names.push({
 						name: row.name,
-						parent: Config.get<ExtraConfig>().VSERVER_ADDR,
-						withdrawn: !row.allowed,
-						type: "institution"
+						startTime: row.start_time,
+						endTime: row.end_time
 					});
 				}
 				//Add processor to response if needed
 				if (data.indexOf(Config.get<ExtraConfig>().VSERVER_ADDR) !== -1) {
-					responseData.push({
+					responseData.set(Config.get<ExtraConfig>().VSERVER_ADDR, {
 						addr: Config.get<ExtraConfig>().VSERVER_ADDR,
-						name: Config.get<ExtraConfig>().VSERVER_NAME,
-						withdrawn: false,
+						names: [{
+							name: Config.get<ExtraConfig>().VSERVER_NAME,
+							startTime: 0,
+							endTime: null
+						}],
+						revokedTime: null,
 						type: "processor"
 					});
 				}
-				return Promise.resolve(responseData);
+				//Sort all names on new to old
+				for (const resultRow of responseData.values()) {
+					resultRow.names.sort((a, b) => b.startTime - a.startTime);
+				}
+				return Promise.resolve(Array.from(responseData.values()));
 			} catch (error) {
 				Log.warn("Failed to retrieve address info for institutions.", error);
 				return Promise.reject("Unable to retrieve address info.");
@@ -259,12 +326,17 @@ export default class SurfHandlerV1 extends addBasics(ActionHandler) {
 		}
 	}
 
-	protected rootInfoMessage(): Promise<AddrInfo> {
-		return Promise.resolve({
-			addr: Config.get<ExtraConfig>().VSERVER_ADDR,
-			name: Config.get<ExtraConfig>().VSERVER_NAME,
-			withdrawn: false,
-			type: "processor"
-		} as AddrInfo);
+	/** Register to receive push messages for all transactions. */
+	protected async allPushMessage(): Promise<void> {
+		if (!this.allPush) {
+			this.allPush = true;
+			Database.get().addListener(this);
+			this.addUpdateHandler(this.allPushHandler);
+		}
+	}
+
+	/** Send the push messages with type "all". */
+	protected allPushHandler(tx: DBTransaction): void {
+		this.handler.sendPush(this, "all", tx);
 	}
 }

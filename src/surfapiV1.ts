@@ -13,7 +13,6 @@
  * EndorsersBadgeClass: string, string[]
  * EndorsedBadges: string, string[]
  * EndorsedBadgeClasses: string, string[]
- * BadgeClassInfo: string[], BadgeClass[]
  * Entities: string, string[]
  * Institution: string, string | undefined
  * Institutions: no request data, string[]
@@ -21,39 +20,78 @@
  * RootInfo: no request data, AddrInfo
  */
 export enum RequestType {
-	BadgeClasses = "badgeClasses",
-	EndorsersBadge = "endorsersBadge",
-	EndorsersBadgeClass = "endorsersBadgeClass",
-	EndorsedBadges = "endorsedBadges",
-	EndorsedBadgeClasses = "endorsedBadgeClasses",
-	BadgeClassInfo = "badgeClassInfo",
+	//All endorsers for a badge(class)
+	EndorsersBadge = "endorsersbadge",
+	EndorsersBadgeClass = "endorsersbadgeclass",
+	//All badge(classes) endorsed by someone
+	EndorsedBadges = "endorsedbadges",
+	EndorsedBadgeClasses = "endorsedbadgeclasses",
+	//The badge(class)(endorsement) itsself
+	Badge = "badge",
+	BadgeClass = "badgeclass",
+	EndorsementBadge = "endorsementbadge",
+	EndorsementBadgeClass = "endorsementbadgeclass",
+	//Other info
+	BadgeClasses = "badgeclasses",
 	Entities = "entities",
 	Institution = "institution",
 	Institutions = "institutions",
-	AddrInfo = "addrInfo",
-	RootInfo = "rootInfo"
+	AddrInfo = "addrinfo",
+	RootInfo = "rootinfo",
+	//Subscribe for push updates
+	AllPush = "allpush"
 }
 
 export type RequestData = AddrInfoRequest | string;
 
 export interface AddrInfoRequest {
 	addresses: string[];
-	withdrawn: boolean;
+	revokedTime: number | null;
 }
 
 //Responses or pushes
-export type ResponseData = BadgeClass[] | AddrInfo[] | string[] | string | undefined;
+export type ResponseData = AddrInfo[] | { [key: string]: number } | string | undefined;
 
-export interface BadgeClass {
-	badgeClass: string;
-	firstEndorser: string;
-	metadata: object;
+export interface EndorsedBadge {
+	id: number; //Id of endorsement
+	badge: string; //Badge that is endorsed by entity
+	issued_on: number;
+	revoked: number | null;
+	json: any;
+}
+
+export interface EndorsedBadgeClass {
+	id: number; //Id of endorsement
+	class: string; //Badge class that is endorsed by entity
+	issued_on: number;
+	revoked: number | null;
+	json: any;
+}
+
+export interface EndorserBadge {
+	id: number; //Id of endorsement
+	entity: string; //Address of entity that endorses the badge
+	issued_on: number;
+	json: any;
+}
+
+export interface EndorserBadgeClass {
+	id: number; //Id of endorsement
+	entity: string; //Address of entity that endorses the badge class
+	issued_on: number;
+	revoked: number | null;
+	json: any;
 }
 
 export interface AddrInfo {
 	addr: string;
-	name: string;
+	names: Array<{
+		name: string;
+		startTime: number;
+		endTime: number | null;
+	}>;
 	parent?: string;
-	withdrawn: boolean;
+	iri?: string;
+	revokedTime: number | null;
 	type: "entity" | "institution" | "processor";
 }
